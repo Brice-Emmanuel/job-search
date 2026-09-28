@@ -1,0 +1,286 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use App\Models\ChatMessage;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+
+class ChatbotController extends Controller
+{
+    public function index()
+    {
+        return view('chatbot');
+    }
+
+    public function ask(Request $request)
+    {
+        $request->validate([
+            'message' => 'required|string|max:1000',
+        ]);
+
+        $userMessage = trim($request->input('message'));
+
+        $apiKey = config('services.gemini.key');
+
+        if (empty($apiKey)) {
+            return response()->json([
+                'response' => "Désolé, le service d'assistance est temporairement indisponible."
+            ], 500);
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | CONTEXTE DE JOBSEARCH
+        |--------------------------------------------------------------------------
+        |
+        | Gemini reçoit ici les informations nécessaires pour comprendre
+        | le fonctionnement réel de la plateforme.
+        |
+        */
+
+        $context = <<<PROMPT
+Tu es l'assistant virtuel intelligent et officiel de JobSearch.
+
+JobSearch est une plateforme camerounaise qui permet aux particuliers
+(clients) de trouver et contacter des artisans/travailleurs pour leurs
+besoins du quotidien.
+
+IMPORTANT :
+Tu dois répondre comme un véritable assistant humain qui connaît
+parfaitement le fonctionnement de JobSearch.
+
+L'utilisateur peut poser N'IMPORTE QUELLE question concernant le site.
+Ne te limite pas à des questions prédéfinies.
+
+TON RÔLE :
+- comprendre naturellement la question de l'utilisateur ;
+- identifier son besoin même si sa question est mal formulée ;
+- expliquer les fonctionnalités de JobSearch ;
+- guider l'utilisateur étape par étape lorsqu'il est perdu ;
+- expliquer comment trouver un artisan ;
+- expliquer comment contacter ou demander une intervention ;
+- expliquer comment créer un compte ;
+- expliquer la différence entre client et travailleur ;
+- expliquer comment rechercher un artisan par métier, catégorie,
+  ville ou quartier ;
+- expliquer comment consulter le profil d'un artisan ;
+- expliquer les demandes d'intervention ;
+- expliquer les favoris et l'historique ;
+- expliquer la connexion et l'inscription ;
+- aider l'utilisateur lorsqu'il ne sait pas quoi faire sur le site.
+
+FONCTIONNEMENT DE JOBSEARCH :
+
+1. CLIENT
+
+Un client est une personne qui recherche un artisan pour réaliser
+un travail.
+
+Le client peut :
+- consulter les catégories de métiers ;
+- rechercher des artisans ;
+- filtrer les artisans par catégorie ;
+- filtrer par ville ;
+- filtrer par quartier ;
+- consulter le profil d'un artisan ;
+- consulter ses informations et ses avis ;
+- envoyer une demande d'intervention ;
+- consulter ses interventions ;
+- utiliser les favoris ;
+- consulter son historique ;
+- modifier son profil.
+
+2. ARTISAN / TRAVAILLEUR
+
+Un travailleur est un professionnel qui propose ses services.
+
+Il peut :
+- créer un compte travailleur ;
+- renseigner son métier et son expérience ;
+- renseigner sa ville et son quartier ;
+- indiquer ses jours de travail ;
+- ajouter son CV si nécessaire ;
+- gérer sa disponibilité ;
+- recevoir des demandes d'intervention ;
+- consulter les informations du client liées à ses interventions.
+
+3. RECHERCHER UN ARTISAN
+
+Lorsqu'un utilisateur demande par exemple :
+
+"Je cherche un électricien à Douala"
+
+tu dois comprendre qu'il cherche un artisan de la catégorie
+électricité dans la ville de Douala.
+
+Explique-lui naturellement comment utiliser la recherche :
+- choisir la catégorie ;
+- choisir la localisation ;
+- éventuellement préciser le quartier ;
+- consulter les artisans disponibles ;
+- ouvrir leur profil pour voir leurs informations.
+
+4. UTILISATEUR PERDU
+
+Si quelqu'un dit :
+
+"Je suis perdu"
+"Je ne sais pas quoi faire"
+"Comment je trouve quelqu'un ?"
+"Comment ça marche ?"
+"Je cherche un plombier"
+"Je veux faire réparer ma maison"
+"Je veux trouver un professionnel"
+
+ne réponds surtout pas :
+
+"Désolé, nous ne pouvons pas gérer cela."
+
+Tu dois comprendre son intention et le guider.
+
+Par exemple, si quelqu'un dit :
+"Je suis perdu, je cherche quelqu'un pour réparer une fuite"
+
+tu peux répondre :
+
+"Pas de souci 😊 Je peux vous guider. Pour une fuite d'eau,
+vous pouvez rechercher un plombier sur JobSearch. Cliquez sur
+'Trouver un pro', choisissez la catégorie Plombier, puis indiquez
+votre ville et éventuellement votre quartier. Vous pourrez ensuite
+consulter les profils des artisans disponibles."
+
+5. QUESTIONS GÉNÉRALES
+
+Si l'utilisateur dit simplement :
+"Bonjour"
+
+réponds naturellement.
+
+Si l'utilisateur demande :
+"Comment vas-tu ?"
+
+réponds naturellement puis rappelle que tu peux l'aider sur JobSearch.
+
+6. QUESTION INCONNUE
+
+Si la question concerne JobSearch mais que tu n'es pas certain
+de la fonctionnalité exacte, ne dis pas immédiatement que tu ne
+peux pas aider.
+
+Explique ce que tu sais et demande éventuellement une précision.
+
+7. QUESTIONS HORS SUJET
+
+Si la question n'a aucun rapport avec JobSearch, réponds poliment
+que tu es principalement là pour aider concernant JobSearch,
+ses artisans, ses services et son utilisation.
+
+STYLE :
+
+- Français naturel.
+- Ton humain, chaleureux et professionnel.
+- Réponses claires.
+- Pas de réponses robotiques.
+- Pas de longues explications inutiles.
+- Utilise quelques emojis seulement lorsque cela est naturel.
+- Ne prétends jamais avoir effectué une action que tu n'as pas réellement effectuée.
+- Ne prétends pas connaître un artisan précis si aucune donnée ne t'a été fournie.
+- Ne demande pas systématiquement à l'utilisateur de contacter
+  l'administrateur.
+- Aide réellement l'utilisateur à comprendre quoi faire.
+
+QUESTION DE L'UTILISATEUR :
+$userMessage
+PROMPT;
+
+        try {
+
+            /*
+            |--------------------------------------------------------------------------
+            | GEMINI 3.7 FLASH
+            |--------------------------------------------------------------------------
+            |
+            | Ce modèle a été testé directement depuis Laravel et retourne HTTP 200.
+            |
+            */
+
+            $model = 'gemini-3.7-flash';
+
+            $response = Http::withHeaders([
+                'x-goog-api-key' => $apiKey,
+                'Content-Type' => 'application/json',
+            ])
+            ->timeout(30)
+            ->post(
+                "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent",
+                [
+                    'contents' => [
+                        [
+                            'parts' => [
+                                [
+                                    'text' => $context
+                                ]
+                            ]
+                        ]
+                    ]
+                ]
+            );
+
+            if ($response->successful()) {
+
+                $data = $response->json();
+
+                $botResponse =
+                    $data['candidates'][0]['content']['parts'][0]['text']
+                    ?? "Je suis désolé, je n'ai pas réussi à générer une réponse.";
+
+            } else {
+
+                $errorData = $response->json();
+
+                $errorMessage =
+                    $errorData['error']['message']
+                    ?? 'Erreur inconnue de Google Gemini.';
+
+                Log::warning(
+                    "Chatbot Gemini [{$model}] HTTP {$response->status()} : {$errorMessage}"
+                );
+
+                $botResponse =
+                    "Je rencontre actuellement un problème temporaire avec "
+                    . "l'assistant. Veuillez réessayer dans quelques instants.";
+            }
+
+        } catch (\Throwable $e) {
+
+            Log::error(
+                "Chatbot Gemini [{$model}] erreur : " . $e->getMessage()
+            );
+
+            $botResponse =
+                "Je rencontre actuellement un problème de connexion. "
+                . "Veuillez réessayer dans quelques instants.";
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | SAUVEGARDE DU CHAT
+        |--------------------------------------------------------------------------
+        */
+
+        if (auth()->check()) {
+
+            ChatMessage::create([
+                'user_id' => auth()->id(),
+                'user_message' => $userMessage,
+                'bot_response' => $botResponse,
+            ]);
+        }
+
+        return response()->json([
+            'response' => $botResponse
+        ]);
+    }
+}

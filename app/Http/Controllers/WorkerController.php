@@ -3,29 +3,34 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
-use Illuminate\Http\Request;
 
 class WorkerController extends Controller
 {
     /**
      * Affiche la liste des travailleurs/artisans.
+     *
+     * Seuls les travailleurs vérifiés sont visibles publiquement.
      */
     public function index()
     {
-        // Récupère tous les utilisateurs ayant le rôle 'travailleur'
-        $workers = User::where('role', 'travailleur')->get();
+        $workers = User::where('role', 'travailleur')
+            ->where('est_verifie', true)
+            ->where('verification_status', 'approved')
+            ->latest()
+            ->get();
 
-        // Renvoie vers la vue dédiée 'workers.index'
         return view('workers.index', compact('workers'));
     }
 
     /**
-     * Affiche le profil détaillé d'un travailleur.
+     * Affiche le profil détaillé d'un travailleur vérifié.
      */
     public function show($id)
     {
-        // Récupère l'artisan en BDD ou renvoie une erreur 404
-        $artisan = User::where('role', 'travailleur')->findOrFail($id);
+        $artisan = User::where('role', 'travailleur')
+            ->where('est_verifie', true)
+            ->where('verification_status', 'approved')
+            ->findOrFail($id);
 
         return view('workers.show', compact('artisan'));
     }

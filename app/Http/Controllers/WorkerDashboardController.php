@@ -9,26 +9,44 @@ use Illuminate\Support\Facades\Auth;
 
 class WorkerDashboardController extends Controller
 {
+    /**
+     * Tableau de bord du travailleur connecté.
+     */
     public function index()
     {
         $user = Auth::user();
+
         $profile = ArtisanProfile::where('user_id', $user->id)->first();
-        
+
         $interventions = Intervention::with(['client', 'category'])
             ->where('travailleur_id', $user->id)
             ->latest()
             ->get();
 
-        return view('worker.dashboard', compact('profile', 'interventions'));
+        return view('worker.dashboard', compact(
+            'profile',
+            'interventions',
+            'user'
+        ));
     }
 
+    /**
+     * Mise à jour de la disponibilité du travailleur.
+     */
     public function updateAvailability(Request $request)
     {
-        $profile = ArtisanProfile::where('user_id', Auth::id())->firstOrFail();
+        $profile = ArtisanProfile::where(
+            'user_id',
+            Auth::id()
+        )->firstOrFail();
+
         $profile->update([
             'disponible' => $request->has('disponible'),
         ]);
 
-        return back()->with('success', 'Disponibilité mise à jour.');
+        return back()->with(
+            'success',
+            'Disponibilité mise à jour.'
+        );
     }
 }
